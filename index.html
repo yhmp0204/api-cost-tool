@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI APIコスト試算ツール</title>
+<style>
+  :root {
+    --bg: #f5f6f4;
+    --card: #ffffff;
+    --text: #2b2f33;
+    --muted: #5f666d;
+    --border: #d9dcd8;
+    --accent: #3b6e8f;
+    --accent-weak: #e6eef3;
+    --best: #2f7a4f;
+    --warn-bg: #fff6e0;
+    --warn-border: #e6c56b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", Meiryo, sans-serif;
+    line-height: 1.7;
+    font-size: 16px;
+  }
+  main { max-width: 860px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; }
+  h2 { font-size: 1.15rem; margin: 0 0 12px; border-left: 4px solid var(--accent); padding-left: 8px; }
+  .lead { color: var(--muted); margin: 0 0 20px; }
+  section {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .presets { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+  button {
+    font: inherit;
+    padding: 8px 14px;
+    border: 1px solid var(--accent);
+    background: var(--accent-weak);
+    color: var(--accent);
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  button:hover { background: #d6e4ec; }
+  .note { font-size: 0.88rem; color: var(--muted); margin: 6px 0 0; }
+  .inputs { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+  label { display: block; font-size: 0.92rem; font-weight: 600; margin-bottom: 4px; }
+  input[type="number"] {
+    width: 100%;
+    font: inherit;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: #fff;
+  }
+  input[type="number"]:focus { outline: 2px solid var(--accent-weak); border-color: var(--accent); }
+  .error {
+    display: none;
+    background: var(--warn-bg);
+    border: 1px solid var(--warn-border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin-top: 12px;
+    font-size: 0.92rem;
+  }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+  th, td { border-bottom: 1px solid var(--border); padding: 8px 6px; text-align: right; white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; white-space: normal; }
+  thead th { background: #f0f2ef; font-weight: 600; }
+  .best { color: var(--best); font-weight: 600; }
+  .provider { display: block; font-size: 0.8rem; color: var(--muted); }
+  .assumption { font-size: 0.88rem; color: var(--muted); margin-top: 10px; }
+  .model-src { border-top: 1px solid var(--border); padding-top: 10px; margin-top: 10px; }
+  .model-src:first-of-type { border-top: none; padding-top: 0; margin-top: 0; }
+  .model-src h3 { font-size: 1rem; margin: 0 0 4px; }
+  dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; font-size: 0.92rem; }
+  dt { color: var(--muted); }
+  dd { margin: 0; word-break: break-word; }
+  a { color: var(--accent); }
+  .disclaimer {
+    background: var(--warn-bg);
+    border: 1px solid var(--warn-border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 0.92rem;
+    margin-top: 12px;
+  }
+  .empty-box {
+    border: 2px dashed var(--border);
+    border-radius: 8px;
+    padding: 24px 16px;
+    text-align: center;
+    color: var(--muted);
+  }
+  footer { text-align: center; font-size: 0.8rem; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>AI APIコスト試算ツール</h1>
+    <p class="lead">個人開発者向けに、AI APIの利用料金を1回あたり・月額の「円」で見積もるツールです。</p>
+  </header>
+
+  <section aria-labelledby="h-preset">
+    <h2 id="h-preset">プリセット</h2>
+    <div class="presets">
+      <button type="button" data-preset="photo">写真認識 1回</button>
+      <button type="button" data-preset="chat">チャット往復 1回</button>
+      <button type="button" data-preset="monthly10k">月1万回</button>
+    </div>
+    <p class="note">プリセットのトークン数は「目安の前提」です。実際のトークン数は画像サイズやプロンプトによって変わるため、下の入力欄ですべて手入力で変更できます。「月1万回」は月間回数だけを 10,000 に変更し、トークン数は現在の入力を保持します。</p>
+  </section>
+
+  <section aria-labelledby="h-input">
+    <h2 id="h-input">入力</h2>
+    <div class="inputs">
+      <div>
+        <label for="inTokens">入力トークン数（1回あたり）</label>
+        <input type="number" id="inTokens" min="0" step="1" value="1600" inputmode="numeric">
+      </div>
+      <div>
+        <label for="outTokens">出力トークン数（1回あたり）</label>
+        <input type="number" id="outTokens" min="0" step="1" value="400" inputmode="numeric">
+      </div>
+      <div>
+        <label for="calls">月間回数</label>
+        <input type="number" id="calls" min="0" step="1" value="1000" inputmode="numeric">
+      </div>
+      <div>
+        <label for="rate">為替レート（円/USD）</label>
+        <input type="number" id="rate" min="0" step="0.01" value="150" inputmode="decimal">
+      </div>
+    </div>
+    <p class="note">為替レート 150 円/USD は初期値なので、実際のレートに合わせて変更してください。</p>
+    <div class="error" id="error" role="alert"></div>
+  </section>
+
+  <section aria-labelledby="h-result">
+    <h2 id="h-result">試算結果</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">モデル</th>
+            <th scope="col">入力単価<br>($/1Mトークン)</th>
+            <th scope="col">出力単価<br>($/1Mトークン)</th>
+            <th scope="col">1回あたり<br>(円)</th>
+            <th scope="col">月額<br>(円)</th>
+            <th scope="col">最安との差額<br>(円/月)</th>
+          </tr>
+        </thead>
+        <tbody id="resultBody"></tbody>
+      </table>
+    </div>
+    <p class="assumption">計算式：(入力トークン × 入力単価 ＋ 出力トークン × 出力単価) ÷ 1,000,000 × 為替レート ＝ 1回あたり円。月額 ＝ 1回あたり円 × 月間回数。1回あたりは小数第2位、月額は小数第1位まで表示（表示は四捨五入）。</p>
+  </section>
+
+  <section aria-labelledby="h-source">
+    <h2 id="h-source">前提・出典</h2>
+    <div id="sourceList"></div>
+    <p class="disclaimer">料金は公式の標準単価ベースの試算であり、実際の請求とは異なる場合があります。無料枠は反映していません。</p>
+  </section>
+
+  <section aria-labelledby="h-actual">
+    <h2 id="h-actual">実測データ</h2>
+    <div class="empty-box">実測データは準備中です。実際に自分のアプリで使ったときのコストを、後日ここに掲載します。</div>
+  </section>
+
+  <footer>料金データ確認日：<span id="footerVerified"></span></footer>
+</main>
+
+<script>
+const PRICING_DATA = {"currency":"USD","models":[{"id":"gemini-2.5-flash-lite","input_usd_per_1m":0.1,"name":"Gemini 2.5 Flash-Lite","notes":"出力単価は thinking tokens を含む。Geminiの中で最も安いモデル。","output_usd_per_1m":0.4,"provider":"Google","source":"https://ai.google.dev/gemini-api/docs/pricing","source_label":"Google 公式 Gemini API pricing","tier":"Paid / Standard（text・image・video入力の単価。audio入力は $0.30）"},{"id":"gemini-2.5-flash","input_usd_per_1m":0.3,"name":"Gemini 2.5 Flash","notes":"出力単価は thinking tokens を含む。公式ページによると gemini-2.5-flash は deprecated で、2026-12-01以降のリクエストは Gemini 3.5 Flash-Lite に自動ルーティングされ、その料金で請求される。","output_usd_per_1m":2.5,"provider":"Google","source":"https://ai.google.dev/gemini-api/docs/pricing","source_label":"Google 公式 Gemini API pricing","tier":"Paid / Standard（text・image・video入力の単価。audio入力は $1.00）"},{"id":"gemini-3.5-flash-lite","input_usd_per_1m":0.3,"name":"Gemini 3.5 Flash-Lite","notes":"出力単価は thinking tokens を含む。公式ページによると、2026-12-01以降は gemini-2.5-flash へのリクエストがこのモデルに自動ルーティングされ、この料金で請求される。","output_usd_per_1m":2.5,"provider":"Google","source":"https://ai.google.dev/gemini-api/docs/pricing","source_label":"Google 公式 Gemini API pricing","tier":"Paid / Standard（text・image・video・audio入力とも同単価）"},{"id":"claude-haiku-4-5","input_usd_per_1m":1.0,"name":"Claude Haiku 4.5","notes":"","output_usd_per_1m":5.0,"provider":"Anthropic","source":"https://platform.claude.com/docs/en/about-claude/pricing","source_label":"Anthropic 公式 Claude Platform Docs pricing","tier":"標準単価（Batch利用時は $0.50 / $2.50、キャッシュ読み取りは $0.10。本ツールは標準単価で計算）"},{"id":"claude-sonnet-4-5","input_usd_per_1m":3.0,"name":"Claude Sonnet 4.5","notes":"","output_usd_per_1m":15.0,"provider":"Anthropic","source":"https://platform.claude.com/docs/en/about-claude/pricing","source_label":"Anthropic 公式 Claude Platform Docs pricing","tier":"標準単価（Batch利用時は $1.50 / $7.50、キャッシュ読み取りは $0.30。本ツールは標準単価で計算）"},{"id":"gpt-6-luna","input_usd_per_1m":0.1,"name":"GPT-6 Luna","notes":"入力プロンプトが272,000トークンを超えると、リクエスト全体に入力2倍・出力1.5倍の単価が適用される。本ツールは通常の短いプロンプトを前提とした試算。","output_usd_per_1m":0.5,"provider":"OpenAI","source":"https://developers.openai.com/api/docs/models/gpt-6-luna","source_label":"OpenAI 公式 GPT-6 Luna モデルページ","tier":"Standard（標準単価。キャッシュ入力は $0.01、Batch / Flex は標準の50%。本ツールは標準単価で計算）"}],"unit":"per 1M tokens","verified_at":"2026-11-08"};
+
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const fields = {
+    inTokens: $("inTokens"),
+    outTokens: $("outTokens"),
+    calls: $("calls"),
+    rate: $("rate"),
+  };
+
+  const PRESETS = {
+    photo: { inTokens: 1600, outTokens: 400, calls: 1000 },
+    chat: { inTokens: 1000, outTokens: 500, calls: 1000 },
+    monthly10k: { calls: 10000 },
+  };
+
+  function fmt(n, digits) {
+    return n.toLocaleString("ja-JP", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  }
+
+  function fmtUsd(n) {
+    return "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+  }
+
+  function readInputs() {
+    const labels = { inTokens: "入力トークン数", outTokens: "出力トークン数", calls: "月間回数", rate: "為替レート" };
+    const values = {};
+    const errors = [];
+    for (const key of Object.keys(fields)) {
+      const raw = fields[key].value.trim();
+      const v = raw === "" ? NaN : Number(raw);
+      if (!Number.isFinite(v) || v < 0) {
+        errors.push(labels[key] + "には 0 以上の数値を入力してください。");
+        values[key] = 0;
+      } else {
+        values[key] = v;
+      }
+    }
+    return { values, errors };
+  }
+
+  function cell(tr, text, className) {
+    const td = document.createElement("td");
+    td.textContent = text;
+    if (className) td.className = className;
+    tr.appendChild(td);
+    return td;
+  }
+
+  function render() {
+    const { values, errors } = readInputs();
+    const err = $("error");
+    if (errors.length) {
+      err.textContent = errors.join(" ") + "（未入力・不正な値は 0 として計算しています）";
+      err.style.display = "block";
+    } else {
+      err.textContent = "";
+      err.style.display = "none";
+    }
+
+    const rows = PRICING_DATA.models.map((m) => {
+      const perCallUsd = (values.inTokens * m.input_usd_per_1m + values.outTokens * m.output_usd_per_1m) / 1000000;
+      const perCallJpy = perCallUsd * values.rate;
+      const monthlyJpy = perCallJpy * values.calls;
+      return { m, perCallJpy, monthlyJpy };
+    });
+    const minMonthly = Math.min(...rows.map((r) => r.monthlyJpy));
+
+    const body = $("resultBody");
+    body.textContent = "";
+    for (const r of rows) {
+      const tr = document.createElement("tr");
+      const th = document.createElement("th");
+      th.scope = "row";
+      th.textContent = r.m.name;
+      const prov = document.createElement("span");
+      prov.className = "provider";
+      prov.textContent = r.m.provider;
+      th.appendChild(prov);
+      tr.appendChild(th);
+      cell(tr, fmtUsd(r.m.input_usd_per_1m));
+      cell(tr, fmtUsd(r.m.output_usd_per_1m));
+      cell(tr, fmt(r.perCallJpy, 2) + " 円");
+      cell(tr, fmt(r.monthlyJpy, 1) + " 円");
+      const diff = r.monthlyJpy - minMonthly;
+      if (diff === 0) {
+        cell(tr, "最安", "best");
+      } else {
+        cell(tr, "+" + fmt(diff, 1) + " 円");
+      }
+      body.appendChild(tr);
+    }
+  }
+
+  function renderSources() {
+    const list = $("sourceList");
+    for (const m of PRICING_DATA.models) {
+      const box = document.createElement("div");
+      box.className = "model-src";
+      const h = document.createElement("h3");
+      h.textContent = m.name + "（" + m.provider + " / " + m.id + "）";
+      box.appendChild(h);
+
+      const dl = document.createElement("dl");
+      const add = (label, node) => {
+        const dt = document.createElement("dt");
+        dt.textContent = label;
+        const dd = document.createElement("dd");
+        if (typeof node === "string") dd.textContent = node; else dd.appendChild(node);
+        dl.appendChild(dt);
+        dl.appendChild(dd);
+      };
+
+      const a = document.createElement("a");
+      a.href = m.source;
+      a.textContent = m.source_label;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      add("出典", a);
+      add("確認日", PRICING_DATA.verified_at);
+      add("単価", fmtUsd(m.input_usd_per_1m) + "（入力） / " + fmtUsd(m.output_usd_per_1m) + "（出力） " + PRICING_DATA.unit + "（" + PRICING_DATA.currency + "）");
+      add("tier", m.tier);
+      add("注記", m.notes ? m.notes : "なし");
+
+      box.appendChild(dl);
+      list.appendChild(box);
+    }
+    $("footerVerified").textContent = PRICING_DATA.verified_at;
+  }
+
+  document.querySelectorAll("[data-preset]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const p = PRESETS[btn.dataset.preset];
+      for (const key of Object.keys(p)) fields[key].value = p[key];
+      render();
+    });
+  });
+  Object.values(fields).forEach((el) => el.addEventListener("input", render));
+
+  renderSources();
+  render();
+})();
+</script>
+</body>
+</html>
